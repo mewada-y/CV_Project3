@@ -1,6 +1,9 @@
 #include <cstdio>
 #include <opencv2/opencv.hpp>
 #include </usr/include/eigen3/Eigen/Dense>
+#include <random>
+#include <cmath>
+
 
 using namespace cv;
 using namespace std;
@@ -24,8 +27,10 @@ public:
     Mat soble_y = (Mat_<float>(3,3) << -1,-2,-1,0,0,0,1,2,1);
     const int MIN_POINTS = 4;
     const double THRESHOLD = 10;
-    const int MAX_ITERATIONS = 1000;
+    const int MAX_ITERATIONS = 2000;
     double ncc_thres = 0.9;
+    const int SAMPLE_SIZE = 8;
+    const int ERROR_THRES = 1;
 
     imageMosaicing(string _path);
     pair<vector<Point>, vector<Point>> perform_harris(int thresh);
@@ -35,7 +40,8 @@ public:
     vector<pair<Point, Point>> estimate_homography_ransac(vector<Point> src_points, vector<Point> dst_points);
     vector<Point> harris_detector_for_img1(int thres = 250);
     vector<Point> harris_detector_for_img2(int thres = 250);
-    Mat findFundamentalMat(vector<pair<Point, Point>> corresspondingPts);
+    Mat estimateFunMat(Mat A);
+    Mat estimateFunndamentalRANSAC(vector<pair<Point,Point>> corees_pts);
     Mat kron(vector<pair<Point,Point>> corees_pts);
 
 };
@@ -105,6 +111,7 @@ vector<Point> imageMosaicing::harris_detector_for_img1(int thres){
         }
     }
     cv::imshow("corners",cr);
+    cv::imwrite("cornerimg1.jpg",cr);
     cv::waitKey(0);
     return corner_coor;
 }
@@ -162,6 +169,7 @@ vector<Point> imageMosaicing::harris_detector_for_img2(int thres){
         }
     }
     cv::imshow("corners",cr);
+    cv::imwrite("cornerimg2.jpg",cr);
     cv::waitKey(0);
     return corner_coor;
 }
@@ -363,14 +371,16 @@ vector<pair<Point, Point>> imageMosaicing::get_correspondences(vector<Point> c1,
     cvtColor(img2,cr2,COLOR_GRAY2BGR);
     cvtColor(img1,cr1,COLOR_GRAY2BGR);
     hconcat(cr1, cr2, img_matches);
+    RNG rng(12345);
     for (int i = 0; i < corres.size() ; i++) {
         Point pt1 =  corres[i].first;
         Point pt2 = Point(corres[i].second.x + img1.cols, corres[i].second.y); // shift the x-coordinate of pt2 to the right of img1
         // Point pt2 = Point(fc[i].second.x, fc[i].second.y + img1.rows);
-        line(img_matches, pt1, pt2, Scalar(30, 30, 255), 1);
+        Scalar color = Scalar(rng.uniform(0,255), rng.uniform(0, 255), rng.uniform(0, 255));
+        line(img_matches, pt1, pt2, color, 1);
     }
     imshow( "result_window", img_matches );
-    cv::imwrite("CorrepondencespreHomography.jpg",img_matches);
+    cv::imwrite("CorrepondencespreRansac.jpg",img_matches);
     cv::waitKey(0);
     return corres;
 }
@@ -381,7 +391,7 @@ void imageMosaicing::visualise_corress(vector<pair<Point, Point>> fc){
         double scale = (double)img1.cols / img2.cols;
         resize(img2, img2, Size(img1.cols, scale*img2.rows));
     }
-    
+    RNG rng(12345);
     // Concatenate images vertically
     // vconcat(img1, img2, img_matches);
     hconcat(img1, img2, img_matches);
@@ -389,7 +399,8 @@ void imageMosaicing::visualise_corress(vector<pair<Point, Point>> fc){
         Point pt1 =  fc[i].first;
         Point pt2 = Point(fc[i].second.x + img1.cols, fc[i].second.y); // shift the x-coordinate of pt2 to the right of img1
         // Point pt2 = Point(fc[i].second.x, fc[i].second.y + img1.rows);
-        line(img_matches, pt1, pt2, Scalar(0, 255, 0), 1);
+        Scalar color = Scalar(rng.uniform(0,255), rng.uniform(0, 255), rng.uniform(0, 255));
+        line(img_matches, pt1, pt2, color, 1);
     }
     imshow( "result_window", img_matches );
     cv::imwrite("CorrepondencespreHomography.jpg",img_matches);
@@ -467,70 +478,187 @@ vector<pair<Point, Point>> imageMosaicing::estimate_homography_ransac(vector<Poi
     Mat cr2,cr1;
     cvtColor(img2,cr2,COLOR_GRAY2BGR);
     cvtColor(img1,cr1,COLOR_GRAY2BGR);
+    RNG rng(12345);
     hconcat(cr1, cr2, img_matches);
     for (int i = 0; i < bestCorrespondingPoints.size() ; i++) {
         Point pt1 =  bestCorrespondingPoints[i].first;
         Point pt2 = Point(bestCorrespondingPoints[i].second.x + img1.cols, bestCorrespondingPoints[i].second.y); // shift the x-coordinate of pt2 to the right of img1
         // Point pt2 = Point(fc[i].second.x, fc[i].second.y + img1.rows);
-        line(img_matches, pt1, pt2, Scalar(30, 30, 255), 1);
+        Scalar color = Scalar(rng.uniform(0,255), rng.uniform(0, 255), rng.uniform(0, 255));
+        line(img_matches, pt1, pt2, color, 1);
     }
     imshow( "result_window", img_matches );
-    // cv::imwrite("CorrepondencespostHomography.jpg",img_matches);
+    cv::imwrite("CorrepondencespostRansac.jpg",img_matches);
     cv::waitKey(0);
     // visualise_corress(bestCorrespondingPoints);
     
     return bestCorrespondingPoints;
 }
 Mat imageMosaicing::kron(vector<pair<Point, Point>> bestCorrespondingPoints){
-    // Point xl[8][1] = {Point(0,0)};
-    // Point xr[8][1] = {Point(0,0)};
-    Mat kron(bestCorrespondingPoints.size(),9,CV_32F);
-    cout<<bestCorrespondingPoints.size()<<endl;
-    cout<<kron.size()<<endl;
-    // vector<Point> xl,xr;
-    vector<Point> xl,xr;
-    
-    for (int i = 0; i < bestCorrespondingPoints.size(); i++) {
-        xl.push_back(bestCorrespondingPoints[i].first);
-        xr.push_back(bestCorrespondingPoints[i].second);
-    }
-    Scalar xlmean,xlstd;
-    Scalar xrmean,xrstd;
-
-    meanStdDev(xl,xlmean,xlstd);
-    meanStdDev(xr,xrmean,xrstd);
-
-    // cout << xlstd << endl;
+    Mat kron(bestCorrespondingPoints.size(),9,CV_64F);
+    // cout<<bestCorrespondingPoints.size()<<endl;
+    // cout<<kron.size()<<endl;
     for (int i = 0; i < bestCorrespondingPoints.size() ; i++) {
-        Point pt1 =  bestCorrespondingPoints[i].first;
-        Point pt2 = bestCorrespondingPoints[i].second;
-        Mat row = (Mat_<float>(9,1) << pt1.x*pt2.x, pt1.x*pt2.y,pt1.x,pt1.y*pt2.x,pt1.y*pt2.y, pt1.y, pt2.x,pt2.y,1);
-
-        kron.row(i) = row;
+        Point2d pt1 =  bestCorrespondingPoints[i].first;
+        Point2d pt2 = bestCorrespondingPoints[i].second;
+        // cout<<pt1.x*pt2.x<<endl;
+        Mat row = (Mat_<double>(9,1) << pt1.x*pt2.x, pt1.x*pt2.y,pt1.x,pt1.y*pt2.x,pt1.y*pt2.y, pt1.y, pt2.x,pt2.y,1);
+        kron.at<double>(i,0) = row.at<double>(0,0);
+        kron.at<double>(i,1) = row.at<double>(0,1);
+        kron.at<double>(i,2) = row.at<double>(0,2);
+        kron.at<double>(i,3) = row.at<double>(0,3);
+        kron.at<double>(i,4) = row.at<double>(0,4);
+        kron.at<double>(i,5) = row.at<double>(0,5);
+        kron.at<double>(i,6) = row.at<double>(0,6);
+        kron.at<double>(i,7) = row.at<double>(0,7);
+        kron.at<double>(i,8) = row.at<double>(0,8);
+        // Mat kron_row = kron.row(i).setTo(row);
+        // row.copyTo(kron_row);
+        //  = row;
         // cout << row << endl;
+        // cout << kron.row(1) << endl;
     }
+    // cout << "[";
     // for (int i = 0; i < kron.rows ; i++){
-    //     cout << "[";
     //     for (int j = 0; j < kron.cols; j++){
-    //         cout << kron.at<float>(i,j) << " ";
+    //         cout << kron.at<double>(i,j) << " ";
     //     }
-    //     cout << " ]"<< endl;
+    //     cout << endl;
     // }
+    // cout << " ]"<< endl;
+    return kron;
 }
-// Mat imageMosaicing::findFundamentalMat(vector<pair<Point, Point>> corresspondingPts){
 
-// }
+Mat imageMosaicing::estimateFunMat(Mat A){
+    SVD svdTemp(A,SVD::FULL_UV);
 
+    Mat fUtil = svdTemp.vt.row(8);
+    Mat Ftemp(3,3,CV_64FC1);
+
+    Ftemp.at<double>(0,0) = fUtil.at<double>(0,0);
+    Ftemp.at<double>(0,1) = fUtil.at<double>(0,1);
+    Ftemp.at<double>(0,2) = fUtil.at<double>(0,2);
+    Ftemp.at<double>(1,0) = fUtil.at<double>(0,3);
+    Ftemp.at<double>(1,1) = fUtil.at<double>(0,4);
+    Ftemp.at<double>(1,2) = fUtil.at<double>(0,5);
+    Ftemp.at<double>(2,0) = fUtil.at<double>(0,6);
+    Ftemp.at<double>(2,1) = fUtil.at<double>(0,7);
+    Ftemp.at<double>(2,2) = fUtil.at<double>(0,8);
+    // cout << "Old F = [";
+    // for (int i = 0; i < Ftemp.rows ; i++){
+    //     for (int j = 0; j < Ftemp.cols; j++){
+    //         cout << Ftemp.at<double>(i,j) << " ";
+    //     }
+    //     cout << endl;
+    // }
+    // cout << " ]"<< endl;
+    Mat F(3,3,Ftemp.type());
+    SVD svd(Ftemp,SVD::FULL_UV);
+    // cout << svd.u.size() << endl;
+    // cout << svd.vt.t().size() << endl;
+    // cout << svd.w.size() << endl;
+    svd.w.at<double>(0,2) = 0;
+    Mat w(3,3,CV_64F);
+    w.at<double>(0,0) = svd.w.at<double>(0,0);
+    w.at<double>(0,1) = 0;
+    w.at<double>(0,2) = 0;
+    w.at<double>(1,0) = 0;
+    w.at<double>(1,1) = svd.w.at<double>(0,1);
+    w.at<double>(1,2) = 0;
+    w.at<double>(2,0) = 0;
+    w.at<double>(2,1) = 0;
+    w.at<double>(2,2) = 0;
+    F = svd.u*w*svd.vt;
+    // cout << "New F = [";
+    // for (int i = 0; i < Ftemp.rows ; i++){
+    //     for (int j = 0; j < Ftemp.cols; j++){
+    //         cout << Ftemp.at<double>(i,j) << " ";
+    //     }
+    //     cout << endl;
+    // }
+    // cout << " ]"<< endl;
+    Ftemp.at<double>(3,3) = 1;
+
+    return Ftemp;
+    
+    
+}
+
+Mat imageMosaicing::estimateFunndamentalRANSAC(vector<pair<Point,Point>> corees_pts){
+    Mat bestF;
+    
+    int bestInliercnt = 0;
+    vector<Point> xl,xr;
+    for (int i = 0; i < corees_pts.size(); i++) {
+    xl.push_back(corees_pts[i].first);
+    xr.push_back(corees_pts[i].second);
+    }
+    // Get 8 Random points
+    for(int i=0;i<MAX_ITERATIONS;i++){
+        vector<Point2f> sampxl,sampxr;
+        random_shuffle(corees_pts.begin(),corees_pts.end());
+        for(int j =0;j<SAMPLE_SIZE;j++){
+            sampxl.push_back(xl[j]);
+            sampxr.push_back(xr[j]);
+        }
+        Mat F = findFundamentalMat(sampxl,sampxr,FM_8POINT);
+        int inlierCount = 0;
+        for (int k = 0; k < xl.size(); k++) {
+            // Mat x1(xl[i].);
+            // Mat x2(xr);
+            double error = abs(xr[k].x * F.at<double>(0,0) * xl[k].x +
+                               xr[k].x * F.at<double>(0,1) * xl[k].y +
+                               F.at<double>(0,2) * xl[k].x +
+                               xr[k].y * F.at<double>(1,0) * xl[k].x +
+                               xr[k].y * F.at<double>(1,1) * xl[k].y +
+                               F.at<double>(1,2) * xl[k].y +
+                               F.at<double>(2,0) * xl[k].x +
+                               F.at<double>(2,1) * xl[k].y +
+                               F.at<double>(2,2));
+            if (error < ERROR_THRES){
+                inlierCount++;
+                // cout << "error < 1" << endl;
+            }
+        }
+        if (inlierCount > bestInliercnt){
+            bestInliercnt = inlierCount;
+            bestF = F;
+        }
+    }
+    vector<Point> inlierxL,inlierxR;
+    for (int k = 0; k < xl.size(); k++) {
+            // Mat x1(xl[i].);
+            // Mat x2(xr);
+            double error = abs(xr[k].x * bestF.at<double>(0,0) * xl[k].x +
+                               xr[k].x * bestF.at<double>(0,1) * xl[k].y +
+                               bestF.at<double>(0,2) * xl[k].x +
+                               xr[k].y * bestF.at<double>(1,0) * xl[k].x +
+                               xr[k].y * bestF.at<double>(1,1) * xl[k].y +
+                               bestF.at<double>(1,2) * xl[k].y +
+                               bestF.at<double>(2,0) * xl[k].x +
+                               bestF.at<double>(2,1) * xl[k].y +
+                               bestF.at<double>(2,2));
+            if (error < ERROR_THRES){
+                inlierxL.push_back(xl[k]);
+                inlierxR.push_back(xr[k]);
+                // cout << "error < 1" << endl;
+            }
+        }
+    bestF = findFundamentalMat(inlierxL,inlierxR,FM_8POINT);
+    return bestF;
+
+}
 int main(){
-    string path = "/home/yash/Documents/Computer_VIsion/CV_Project3/Inputs/";
-        
+    string path = "/home/yash/Documents/Computer_VIsion/CV_Project3/CV_Project3/Inputs/";
+    Mat imgL = imread(path + string("building_left.png"),IMREAD_GRAYSCALE);
+    Mat imgR = imread(path + string("building_right.png"),IMREAD_GRAYSCALE);
+
     imageMosaicing p3(path);
     vector<Point> cor_img1,cor_img2;
     
     cor_img1 = p3.harris_detector_for_img1(230);
     cor_img2 = p3.harris_detector_for_img2(230);
 
-    
     vector<pair<Point,Point>> corres;
     corres = p3.get_correspondences(cor_img1,cor_img2);
     cout << "done" << endl;
@@ -543,5 +671,53 @@ int main(){
     }
     vector<pair<Point,Point>> inliers;
     inliers = p3.estimate_homography_ransac(src,dst);
-    p3.kron(inliers);
+    Mat A = p3.kron(inliers);
+    Mat svdF = p3.estimateFunMat(A);
+    Mat F = p3.estimateFunndamentalRANSAC(inliers);
+    cout << "Ransac F = [";
+    for (int i = 0; i < F.rows ; i++){
+        for (int j = 0; j < F.cols; j++){
+            cout << F.at<double>(i,j) << " ";
+        }
+        cout << endl;
+    }
+    cout << " ]"<< endl;
+
+    cout << "SVD F = [";
+    for (int i = 0; i < svdF.rows ; i++){
+        for (int j = 0; j < svdF.cols; j++){
+            cout << svdF.at<double>(i,j) << " ";
+        }
+        cout << endl;
+    }
+    cout << " ]"<< endl;
+
+
+    vector<Point> inlierxl,inlierxr;
+    for (int i = 0; i < inliers.size(); i++) {
+    inlierxl.push_back(inliers[i].first);
+    inlierxr.push_back(inliers[i].second);
+    }
+    // Rectify the images
+    Mat H1, H2;
+    stereoRectifyUncalibrated(inlierxl,inlierxr,F,imgL.size(),H1,H2);
+    Mat imgRectL, imgRectR,rectimgs;
+    warpPerspective(imgL, imgRectL, H1, imgL.size());
+    warpPerspective(imgR, imgRectR, H2, imgR.size());
+
+    hconcat(imgRectL,imgRectR,rectimgs);
+    imshow("rectL",rectimgs);
+    cv::imwrite("Rectified Images.jpg",rectimgs);
+    waitKey(0);
+
+    Mat h1, h2;
+    stereoRectifyUncalibrated(inlierxl,inlierxr,svdF,imgL.size(),h1,h2);
+    Mat imgRectl, imgRectr,rectImgs;
+    warpPerspective(imgL, imgRectl, h1, imgL.size());
+    warpPerspective(imgR, imgRectr, h2, imgR.size());
+
+    hconcat(imgRectl,imgRectr,rectImgs);
+    imshow("rectalL",rectImgs);
+    cv::imwrite("Rectified Images SVD.jpg",rectImgs);
+    waitKey(0);
 }
