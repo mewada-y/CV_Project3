@@ -69,8 +69,13 @@ dispVec.at<Vec3f>(y, x) = Vec3f(0, 0, 0);
 
 // Display result
 imshow("Vertical disparity component", dispY);
+cv::imwrite( "Vertical Disparity.jpg", dispY );
 imshow("Horizontal disparity component", dispX);
+cv::imwrite( "Horizontal Disparity.jpg", dispX );
 imshow("Disparity vector", dispVec);
+cv::imwrite( "DisparityV.jpg", dispVec);
+
+
 waitKey(0);
 return 0;
 } 
