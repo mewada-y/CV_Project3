@@ -27,7 +27,7 @@ public:
     Mat soble_y = (Mat_<float>(3,3) << -1,-2,-1,0,0,0,1,2,1);
     const int MIN_POINTS = 4;
     const double THRESHOLD = 10;
-    const int MAX_ITERATIONS = 2000;
+    const int MAX_ITERATIONS = 3000;
     double ncc_thres = 0.9;
     const int SAMPLE_SIZE = 8;
     const int ERROR_THRES = 1;
@@ -43,6 +43,7 @@ public:
     Mat estimateFunMat(Mat A);
     Mat estimateFunndamentalRANSAC(vector<pair<Point,Point>> corees_pts);
     Mat kron(vector<pair<Point,Point>> corees_pts);
+    Mat drawLines(Mat img1,Mat img2,vector<double> lines,vector<Point> inlierxl,vector<Point> inlierxr);
 
 };
 
@@ -379,7 +380,7 @@ vector<pair<Point, Point>> imageMosaicing::get_correspondences(vector<Point> c1,
         Scalar color = Scalar(rng.uniform(0,255), rng.uniform(0, 255), rng.uniform(0, 255));
         line(img_matches, pt1, pt2, color, 1);
     }
-    imshow( "result_window", img_matches );
+    imshow( "result_window", img_matches);
     cv::imwrite("CorrepondencespreRansac.jpg",img_matches);
     cv::waitKey(0);
     return corres;
@@ -485,6 +486,8 @@ vector<pair<Point, Point>> imageMosaicing::estimate_homography_ransac(vector<Poi
         Point pt2 = Point(bestCorrespondingPoints[i].second.x + img1.cols, bestCorrespondingPoints[i].second.y); // shift the x-coordinate of pt2 to the right of img1
         // Point pt2 = Point(fc[i].second.x, fc[i].second.y + img1.rows);
         Scalar color = Scalar(rng.uniform(0,255), rng.uniform(0, 255), rng.uniform(0, 255));
+        circle(img_matches, Point(pt1.x,pt1.y), 1, Scalar(30, 255, 30), 2,8,0);
+        circle(img_matches, Point(pt2.x,pt2.y), 1, Scalar(30, 255, 30), 2,8,0);
         line(img_matches, pt1, pt2, color, 1);
     }
     imshow( "result_window", img_matches );
@@ -494,6 +497,7 @@ vector<pair<Point, Point>> imageMosaicing::estimate_homography_ransac(vector<Poi
     
     return bestCorrespondingPoints;
 }
+
 Mat imageMosaicing::kron(vector<pair<Point, Point>> bestCorrespondingPoints){
     Mat kron(bestCorrespondingPoints.size(),9,CV_64F);
     // cout<<bestCorrespondingPoints.size()<<endl;
@@ -648,6 +652,13 @@ Mat imageMosaicing::estimateFunndamentalRANSAC(vector<pair<Point,Point>> corees_
     return bestF;
 
 }
+
+// Mat imageMosaicing::drawLines(Mat img1,Mat img2,vector<double> lines,vector<Point> inlierxl,vector<Point> inlierxr){
+//     int h = img1.rows;
+//     int w = img1.cols;
+
+// }
+
 int main(){
     string path = "/home/yash/Documents/Computer_VIsion/CV_Project3/CV_Project3/Inputs/";
     Mat imgL = imread(path + string("building_left.png"),IMREAD_GRAYSCALE);
@@ -670,10 +681,13 @@ int main(){
         dst.push_back(corres[i].second);
     }
     vector<pair<Point,Point>> inliers;
-    inliers = p3.estimate_homography_ransac(src,dst);
+
+    inliers = p3.estimate_homography_ransac(src,dst);    
     Mat A = p3.kron(inliers);
     Mat svdF = p3.estimateFunMat(A);
+    
     Mat F = p3.estimateFunndamentalRANSAC(inliers);
+
     cout << "Ransac F = [";
     for (int i = 0; i < F.rows ; i++){
         for (int j = 0; j < F.cols; j++){
@@ -693,10 +707,10 @@ int main(){
     cout << " ]"<< endl;
 
 
-    vector<Point> inlierxl,inlierxr;
+    vector<Point2f> inlierxl,inlierxr;
     for (int i = 0; i < inliers.size(); i++) {
-    inlierxl.push_back(inliers[i].first);
-    inlierxr.push_back(inliers[i].second);
+        inlierxl.push_back(inliers[i].first);
+        inlierxr.push_back(inliers[i].second);
     }
     // Rectify the images
     Mat H1, H2;
@@ -704,20 +718,64 @@ int main(){
     Mat imgRectL, imgRectR,rectimgs;
     warpPerspective(imgL, imgRectL, H1, imgL.size());
     warpPerspective(imgR, imgRectR, H2, imgR.size());
-
     hconcat(imgRectL,imgRectR,rectimgs);
     imshow("rectL",rectimgs);
     cv::imwrite("Rectified Images.jpg",rectimgs);
     waitKey(0);
 
-    Mat h1, h2;
-    stereoRectifyUncalibrated(inlierxl,inlierxr,svdF,imgL.size(),h1,h2);
-    Mat imgRectl, imgRectr,rectImgs;
-    warpPerspective(imgL, imgRectl, h1, imgL.size());
-    warpPerspective(imgR, imgRectr, h2, imgR.size());
+    // vector<Point> xl,xr;
+    // for (int i = 0; i < corees_pts.size(); i++) {
+    //     xl.push_back(corees_pts[i].first);
+    //     xr.push_back(corees_pts[i].second);
+    // }
+    Mat OldF = findFundamentalMat(inlierxl,inlierxr,FM_8POINT);
+    
+    Mat lines1;
+    computeCorrespondEpilines(cv::Mat(inlierxl),1,F,lines1);
+    // cout << lines1 << endl;
+    // cout << lines1.at<double>(0)<< endl;
+    // cout << lines1.at<Vec3b>(0,0)<< endl;
+    Mat color1;
+    cvtColor(imgRectR,color1,COLOR_GRAY2BGR);
+    RNG rng(12345);
+    for (int i = 0; i < lines1.rows ; i++){
+        for (int j = 0; j < lines1.cols; j++){
+            // cout << lines1.at<Vec3f>(i,j) << endl;
+            Scalar color = Scalar(rng.uniform(0,255), rng.uniform(0, 255), rng.uniform(0, 255));
+            line(color1,Point(0,-(lines1.at<Vec3f>(i,j))[2]/lines1.at<Vec3f>(i,j)[1]),Point(imgR.cols,-(lines1.at<Vec3f>(i,j)[2] + lines1.at<Vec3f>(i,j)[0] * imgR.cols)/lines1.at<Vec3f>(i,j)[1]),color);
+        }
+        // cout << endl;
+    }
 
-    hconcat(imgRectl,imgRectr,rectImgs);
-    imshow("rectalL",rectImgs);
-    cv::imwrite("Rectified Images SVD.jpg",rectImgs);
+
+    Mat lines2;
+    computeCorrespondEpilines(cv::Mat(inlierxr),2,F,lines2);
+    Mat color2;
+    cvtColor(imgRectL,color2,COLOR_GRAY2BGR);
+    for (int i = 0; i < lines2.rows ; i++){
+        for (int j = 0; j < lines2.cols; j++){
+            // cout << lines1.at<Vec3f>(i,j) << endl;
+            Scalar color = Scalar(rng.uniform(0,255), rng.uniform(0, 255), rng.uniform(0, 255));
+            line(color2,Point(0,-(lines2.at<Vec3f>(i,j))[2]/lines2.at<Vec3f>(i,j)[1]),Point(imgL.cols,-(lines2.at<Vec3f>(i,j)[2] + lines2.at<Vec3f>(i,j)[0] * imgL.cols)/lines2.at<Vec3f>(i,j)[1]),color);
+        }
+        // cout << endl;
+    }
+
+    Mat epipolarLines;
+    hconcat(color1,color2,epipolarLines);
+    imshow("Epipolarlines",epipolarLines);
+    imwrite("Epipolarlines.jpg",epipolarLines);
     waitKey(0);
+
+
+    // Mat h1, h2;
+    // stereoRectifyUncalibrated(inlierxl,inlierxr,svdF,imgL.size(),h1,h2);
+    // Mat imgRectl, imgRectr,rectImgs;
+    // warpPerspective(imgL, imgRectl, h1, imgL.size());
+    // warpPerspective(imgR, imgRectr, h2, imgR.size());
+
+    // hconcat(imgRectl,imgRectr,rectImgs);
+    // imshow("rectalL",rectImgs);
+    // cv::imwrite("Rectified Images SVD.jpg",rectImgs);
+    // waitKey(0);
 }
