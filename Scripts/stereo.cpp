@@ -19,6 +19,8 @@ class imageMosaicing
 {
 private:
     /* data */
+    Mat* lines1 = nullptr;
+    Mat* lines2 = nullptr;
 public:
     string path_to_images;
     Mat img1;
@@ -33,17 +35,15 @@ public:
     const int ERROR_THRES = 1;
 
     imageMosaicing(string _path);
-    pair<vector<Point>, vector<Point>> perform_harris(int thresh);
     double calc_NCC(Mat temp1, Mat temp2);
     vector<pair<Point, Point>> get_correspondences(vector<Point> c1,vector<Point> c2);
-    void visualise_corress(vector<pair<Point, Point>> corresspondences);
     vector<pair<Point, Point>> estimate_homography_ransac(vector<Point> src_points, vector<Point> dst_points);
     vector<Point> harris_detector_for_img1(int thres = 250);
     vector<Point> harris_detector_for_img2(int thres = 250);
     Mat estimateFunMat(Mat A);
     Mat estimateFunndamentalRANSAC(vector<pair<Point,Point>> corees_pts);
     Mat kron(vector<pair<Point,Point>> corees_pts);
-    Mat drawLines(Mat img1,Mat img2,vector<double> lines,vector<Point> inlierxl,vector<Point> inlierxr);
+    void findEpipolarlines(vector<Point2f> inlierxl,vector<Point2f> inlierxr, Mat F, Mat imgRectR, Mat imgRectL,Mat* lines1,Mat* lines2);
 
 };
 
@@ -112,7 +112,7 @@ vector<Point> imageMosaicing::harris_detector_for_img1(int thres){
         }
     }
     cv::imshow("corners",cr);
-    cv::imwrite("cornerimg1.jpg",cr);
+    //imwrite("cornerimg1.jpg",cr);
     cv::waitKey(0);
     return corner_coor;
 }
@@ -170,94 +170,9 @@ vector<Point> imageMosaicing::harris_detector_for_img2(int thres){
         }
     }
     cv::imshow("corners",cr);
-    cv::imwrite("cornerimg2.jpg",cr);
+    //imwrite("cornerimg2.jpg",cr);
     cv::waitKey(0);
     return corner_coor;
-}
-
-pair<vector<Point>, vector<Point>> imageMosaicing::perform_harris(int thresh){
-    Mat dst, dst_norm, dst_norm_scaled;
-    Mat dst2, dst_norm2, dst_norm_scaled2;
-    vector<Point> cor_1,cor_2;
-    dst = Mat::zeros(img1.size(), CV_32FC1);
-    dst2 = Mat::zeros(img2.size(), CV_32FC1);
-
-    int blockSize = 2;
-    int apertureSize = 5;
-    double k = 0.04;
-
-    cornerHarris(img1, dst, blockSize, apertureSize, k, BORDER_DEFAULT);
-    normalize(dst, dst_norm, 0, 255, NORM_MINMAX, CV_32FC1, Mat()); 
-    convertScaleAbs( dst_norm, dst_norm_scaled );
-
-    cornerHarris(img2, dst2, blockSize, apertureSize, k, BORDER_DEFAULT);
-    normalize(dst2, dst_norm2, 0, 255, NORM_MINMAX, CV_32FC1, Mat()); 
-    convertScaleAbs( dst_norm2, dst_norm_scaled2 );
-    
-    vector<Point> corner_coor;
-    Mat cr1;
-    cvtColor(img1,cr1,COLOR_GRAY2BGR);
-    for( int i = 0; i < dst_norm.rows ; i++ )
-    {
-        for( int j = 0; j < dst_norm.cols; j++ )
-        {
-            if( (int) dst_norm.at<float>(i,j) > thresh
-            && dst_norm.at<float>(i, j) > dst_norm.at<float>(i - 1, j - 1)
-            && dst_norm.at<float>(i, j) > dst_norm.at<float>(i - 1, j)
-            && dst_norm.at<float>(i, j) > dst_norm.at<float>(i - 1, j + 1)
-            && dst_norm.at<float>(i, j) > dst_norm.at<float>(i, j - 1)
-            && dst_norm.at<float>(i, j) > dst_norm.at<float>(i, j + 1)
-            && dst_norm.at<float>(i, j) > dst_norm.at<float>(i + 1, j - 1)
-            && dst_norm.at<float>(i, j) > dst_norm.at<float>(i + 1, j)
-            && dst_norm.at<float>(i, j) > dst_norm.at<float>(i + 1, j + 1)
-            )
-            {
-                circle(cr1, Point(j,i), 1, Scalar(30, 30, 255), 2,8,0);
-                cor_1.push_back(Point(j,i));
-            }
-        }
-    }
-    Mat cr2;
-    cvtColor(img2,cr2,COLOR_GRAY2BGR);
-    for( int i = 0; i < dst_norm2.rows ; i++ )
-    {
-        for( int j = 0; j < dst_norm2.cols; j++ )
-        {
-            if( (int) dst_norm2.at<float>(i,j) > thresh - 10
-            && dst_norm2.at<float>(i, j) > dst_norm2.at<float>(i - 1, j - 1)
-            && dst_norm2.at<float>(i, j) > dst_norm2.at<float>(i - 1, j)
-            && dst_norm2.at<float>(i, j) > dst_norm2.at<float>(i - 1, j + 1)
-            && dst_norm2.at<float>(i, j) > dst_norm2.at<float>(i, j - 1)
-            && dst_norm2.at<float>(i, j) > dst_norm2.at<float>(i, j + 1)
-            && dst_norm2.at<float>(i, j) > dst_norm2.at<float>(i + 1, j - 1)
-            && dst_norm2.at<float>(i, j) > dst_norm2.at<float>(i + 1, j)
-            && dst_norm2.at<float>(i, j) > dst_norm2.at<float>(i + 1, j + 1)
-            )
-            {
-                circle(cr2, Point(j,i), 1, Scalar(30, 30, 255), 2,8,0);
-                cor_2.push_back(Point(j,i));
-                // cout << Point(j,i) << endl;
-            }
-        }
-    }
-    Mat concated_img;
-    cout << "corner1_size" << "  ";
-    cout << cor_1.size() << "   ";
-    cout << "corner2_size" << "  ";
-    cout << cor_2.size() << endl;
-    if (img1.cols != img2.cols) {
-        double scale = (double)img1.cols / img2.cols;
-        resize(img2, img2, Size(img1.cols, scale*img2.rows));
-    }
-    
-    // Concatenate images vertically
-    Mat result;
-    cv::hconcat(cr1, cr2, concated_img);
-    cv::namedWindow( "corners_window" );
-    cv::imshow( "corners_window", concated_img);
-    cv::imwrite( "corners_window.jpg", concated_img);
-    cv::waitKey(0);
-    return make_pair(cor_1,cor_2);
 }
 
 double imageMosaicing::calc_NCC(Mat temp1,Mat temp2){
@@ -381,31 +296,9 @@ vector<pair<Point, Point>> imageMosaicing::get_correspondences(vector<Point> c1,
         line(img_matches, pt1, pt2, color, 1);
     }
     imshow( "result_window", img_matches);
-    cv::imwrite("CorrepondencespreRansac.jpg",img_matches);
+    //imwrite("CorrepondencespreRansac.jpg",img_matches);
     cv::waitKey(0);
     return corres;
-}
-
-void imageMosaicing::visualise_corress(vector<pair<Point, Point>> fc){
-    Mat img_matches;
-    if (img1.cols != img2.cols) {
-        double scale = (double)img1.cols / img2.cols;
-        resize(img2, img2, Size(img1.cols, scale*img2.rows));
-    }
-    RNG rng(12345);
-    // Concatenate images vertically
-    // vconcat(img1, img2, img_matches);
-    hconcat(img1, img2, img_matches);
-    for (int i = 0; i < fc.size() ; i++) {
-        Point pt1 =  fc[i].first;
-        Point pt2 = Point(fc[i].second.x + img1.cols, fc[i].second.y); // shift the x-coordinate of pt2 to the right of img1
-        // Point pt2 = Point(fc[i].second.x, fc[i].second.y + img1.rows);
-        Scalar color = Scalar(rng.uniform(0,255), rng.uniform(0, 255), rng.uniform(0, 255));
-        line(img_matches, pt1, pt2, color, 1);
-    }
-    imshow( "result_window", img_matches );
-    cv::imwrite("CorrepondencespreHomography.jpg",img_matches);
-    cv::waitKey(0);
 }
 
 vector<pair<Point, Point>> imageMosaicing::estimate_homography_ransac(vector<Point> src_points, vector<Point> dst_points) {
@@ -421,6 +314,7 @@ vector<pair<Point, Point>> imageMosaicing::estimate_homography_ransac(vector<Poi
     int num_inliers = 0;
     vector<pair<Point, Point>> temp_corres;
     int inlier_idx = -1;
+    double mean_dist = 0;
     //    vector<Point2f> curr_inliers;
     for (int j = 0; j < dst_points.size(); j++) {
         Point src_point = src_points[j];
@@ -433,7 +327,7 @@ vector<pair<Point, Point>> imageMosaicing::estimate_homography_ransac(vector<Poi
         double distance = norm(pred_dst-dst);
         // cout << src <<" << norm , manual >> ";SSSSS
         // cout << p << endl;
-        // cout << distance << endl;
+        cout << distance << endl;
         if (distance < 1) {
             // cout << "got" << endl;
             num_inliers++;
@@ -468,6 +362,8 @@ vector<pair<Point, Point>> imageMosaicing::estimate_homography_ransac(vector<Poi
     }
     // cout << best_homography << endl;
     best_homography = findHomography(inlier_src_points,inlier_dst_points,RANSAC);
+    cout << "best_homography" << endl;
+    cout << best_homography << endl;
     Mat img_matches;
     if (img1.cols != img2.cols) {
         double scale = (double)img1.cols / img2.cols;
@@ -491,7 +387,7 @@ vector<pair<Point, Point>> imageMosaicing::estimate_homography_ransac(vector<Poi
         line(img_matches, pt1, pt2, color, 1);
     }
     imshow( "result_window", img_matches );
-    cv::imwrite("CorrepondencespostRansac.jpg",img_matches);
+    //imwrite("CorrepondencespostRansac.jpg",img_matches);
     cv::waitKey(0);
     // visualise_corress(bestCorrespondingPoints);
     
@@ -594,8 +490,8 @@ Mat imageMosaicing::estimateFunndamentalRANSAC(vector<pair<Point,Point>> corees_
     int bestInliercnt = 0;
     vector<Point> xl,xr;
     for (int i = 0; i < corees_pts.size(); i++) {
-    xl.push_back(corees_pts[i].first);
-    xr.push_back(corees_pts[i].second);
+        xl.push_back(corees_pts[i].first);
+        xr.push_back(corees_pts[i].second);
     }
     // Get 8 Random points
     for(int i=0;i<MAX_ITERATIONS;i++){
@@ -619,6 +515,7 @@ Mat imageMosaicing::estimateFunndamentalRANSAC(vector<pair<Point,Point>> corees_
                                F.at<double>(2,0) * xl[k].x +
                                F.at<double>(2,1) * xl[k].y +
                                F.at<double>(2,2));
+            // cout << error << endl;
             if (error < ERROR_THRES){
                 inlierCount++;
                 // cout << "error < 1" << endl;
@@ -653,11 +550,40 @@ Mat imageMosaicing::estimateFunndamentalRANSAC(vector<pair<Point,Point>> corees_
 
 }
 
-// Mat imageMosaicing::drawLines(Mat img1,Mat img2,vector<double> lines,vector<Point> inlierxl,vector<Point> inlierxr){
-//     int h = img1.rows;
-//     int w = img1.cols;
+void imageMosaicing::findEpipolarlines(vector<Point2f> inlierxl,vector<Point2f> inlierxr, Mat F, Mat imgRectR, Mat imgRectL,Mat* lines1,Mat* lines2){
+    // Mat lines1;
+    Mat color1;
+    cvtColor(imgRectR,color1,COLOR_GRAY2BGR);
+    computeCorrespondEpilines(cv::Mat(inlierxl),1,F,*lines1);
+    RNG rng(12345);
+    for (int i = 0; i < lines1->rows ; i++){
+        for (int j = 0; j < lines1->cols; j++){
+            Scalar color = Scalar(rng.uniform(0,255), rng.uniform(0, 255), rng.uniform(0, 255));
+            line(color1,Point(0,-(lines1->at<Vec3f>(i,j))[2]/ lines1->at<Vec3f>(i,j)[1]),Point(imgRectR.cols,-(lines1->at<Vec3f>(i,j)[2] + lines1->at<Vec3f>(i,j)[0] * imgRectR.cols)/ lines1->at<Vec3f>(i,j)[1]),color);
+        }
+    }
 
-// }
+
+    // Mat lines2;
+    Mat color2;
+    cvtColor(imgRectL,color2,COLOR_GRAY2BGR);
+    computeCorrespondEpilines(cv::Mat(inlierxr),2,F,*lines2);
+    for (int i = 0; i < lines2->rows ; i++){
+        for (int j = 0; j < lines2->cols; j++){
+            Scalar color = Scalar(rng.uniform(0,255), rng.uniform(0, 255), rng.uniform(0, 255));
+            line(color2,Point(0,-(lines2->at<Vec3f>(i,j))[2]/ lines2->at<Vec3f>(i,j)[1]),Point(imgRectL.cols,-(lines2->at<Vec3f>(i,j)[2] + lines2->at<Vec3f>(i,j)[0] * imgRectL.cols)/ lines2->at<Vec3f>(i,j)[1]),color);
+        }
+    }
+    Mat epipolarLines;
+    hconcat(color1,color2,epipolarLines);
+    imshow("Epipolarlines",epipolarLines);
+    //imwrite("Epipolarlines.jpg",epipolarLines);
+    waitKey(0);
+
+    // return lines1,lines2;
+}
+
+
 
 int main(){
     string path = "/home/yash/Documents/Computer_VIsion/CV_Project3/CV_Project3/Inputs/";
@@ -687,7 +613,6 @@ int main(){
     Mat svdF = p3.estimateFunMat(A);
     
     Mat F = p3.estimateFunndamentalRANSAC(inliers);
-
     cout << "Ransac F = [";
     for (int i = 0; i < F.rows ; i++){
         for (int j = 0; j < F.cols; j++){
@@ -720,62 +645,96 @@ int main(){
     warpPerspective(imgR, imgRectR, H2, imgR.size());
     hconcat(imgRectL,imgRectR,rectimgs);
     imshow("rectL",rectimgs);
-    cv::imwrite("Rectified Images.jpg",rectimgs);
+    //imwrite("Rectified Images.jpg",rectimgs);
     waitKey(0);
-
-    // vector<Point> xl,xr;
-    // for (int i = 0; i < corees_pts.size(); i++) {
-    //     xl.push_back(corees_pts[i].first);
-    //     xr.push_back(corees_pts[i].second);
-    // }
-    Mat OldF = findFundamentalMat(inlierxl,inlierxr,FM_8POINT);
+    Mat epi1,epi2;
+    p3.findEpipolarlines(inlierxl,inlierxr,F,imgR,imgL,&epi1,&epi2);
     
-    Mat lines1;
-    computeCorrespondEpilines(cv::Mat(inlierxl),1,F,lines1);
-    // cout << lines1 << endl;
-    // cout << lines1.at<double>(0)<< endl;
-    // cout << lines1.at<Vec3b>(0,0)<< endl;
-    Mat color1;
-    cvtColor(imgRectR,color1,COLOR_GRAY2BGR);
-    RNG rng(12345);
-    for (int i = 0; i < lines1.rows ; i++){
-        for (int j = 0; j < lines1.cols; j++){
-            // cout << lines1.at<Vec3f>(i,j) << endl;
-            Scalar color = Scalar(rng.uniform(0,255), rng.uniform(0, 255), rng.uniform(0, 255));
-            line(color1,Point(0,-(lines1.at<Vec3f>(i,j))[2]/lines1.at<Vec3f>(i,j)[1]),Point(imgR.cols,-(lines1.at<Vec3f>(i,j)[2] + lines1.at<Vec3f>(i,j)[0] * imgR.cols)/lines1.at<Vec3f>(i,j)[1]),color);
+   Ptr<StereoSGBM> stereo = StereoSGBM::create(0, 16, 3);
+
+    // Compute disparity map
+    Mat disp; Mat dispor;
+    cv::Mat disp_x, disp_y; // horizontal and vertical disparity maps
+    stereo->compute(imgRectL, imgRectR, disp);
+    cv::Sobel(disp, disp_x, CV_32F, 1, 0);
+    cv::Sobel(disp, disp_y, CV_32F, 0, 1);
+
+    // Scale the disparity maps to the desired range
+    double min_disp, max_disp;
+    cv::minMaxLoc(disp, &min_disp, &max_disp);
+    disp_x = 255 * (disp_x - min_disp) / (max_disp - min_disp);
+    disp_y = 255 * (disp_y - min_disp) / (max_disp - min_disp);
+
+    // Convert the disparity maps to 8-bit unsigned integers
+    disp_x.convertTo(disp_x, CV_8U);
+    disp_y.convertTo(disp_y, CV_8U);
+
+    Mat vert_disp(disp.size(), CV_32F);
+    Mat hor_disp(disp.size(), CV_32F);
+    Mat disp_vec(disp.size(), CV_32F);
+    for (int i =0;i<disp.rows;i++){
+        for (int j =0;j<disp.cols;j++){
+            Vec3f epiline = epi1.at<Vec3f>(i,j);
+            if ((abs(epi1.at<Vec3f>(i,j)[1])) > (abs(epi1.at<Vec3f>(i,j)[0]))){
+                hor_disp.at<uchar>(i,j) = 0.0;
+                vert_disp.at<uchar>(i,j) = disp.at<uchar>(i,j)/(abs(epiline[1]));
+                cout << "vertical" << endl;
+            }
+            else{
+                vert_disp.at<uchar>(i,j) = 0.0;
+                hor_disp.at<uchar>(i,j) = disp.at<uchar>(i,j)/(abs(epiline[0]));
+            }
         }
-        // cout << endl;
     }
+    Mat dispVec(disp.size(), CV_32FC3);
 
-
-    Mat lines2;
-    computeCorrespondEpilines(cv::Mat(inlierxr),2,F,lines2);
-    Mat color2;
-    cvtColor(imgRectL,color2,COLOR_GRAY2BGR);
-    for (int i = 0; i < lines2.rows ; i++){
-        for (int j = 0; j < lines2.cols; j++){
-            // cout << lines1.at<Vec3f>(i,j) << endl;
-            Scalar color = Scalar(rng.uniform(0,255), rng.uniform(0, 255), rng.uniform(0, 255));
-            line(color2,Point(0,-(lines2.at<Vec3f>(i,j))[2]/lines2.at<Vec3f>(i,j)[1]),Point(imgL.cols,-(lines2.at<Vec3f>(i,j)[2] + lines2.at<Vec3f>(i,j)[0] * imgL.cols)/lines2.at<Vec3f>(i,j)[1]),color);
+    for (int i = 0; i < disp.rows; i++) {
+    for (int j = 0; j < disp.cols; j++) {
+        Point2f pt(j, i);
+        Mat pt1 = (Mat_<double>(3,1) << pt.x, pt.y, 1);
+        Mat pt2 = F * pt1;
+        float x = pt2.at<double>(0,0);
+        float y = pt2.at<double>(1,0);
+        float z = pt2.at<double>(2,0);
+        float disp_val = disp.at<uchar>(i, j);
+        if (z != 0.0) {
+            float vert_disp_val = disp_val * y / z;
+            float hor_disp_val = disp_val * x / z;
+            vert_disp.at<uchar>(i, j) = vert_disp_val;
+            hor_disp.at<uchar>(i, j) = hor_disp_val;
+            float hue = atan2(y, x) * 180 / CV_PI / 2 + 0.5;
+            float saturation = sqrt(x * x + y * y) / z * 255;
+            Vec3b color(saturation, saturation, saturation);
+            color.val[0] = hue;
+            disp_vec.at<Vec3b>(i, j) = color;
         }
-        // cout << endl;
     }
+}
+    // cvtColor(disp, disp_vec, COLOR_GRAY2BGR);
 
-    Mat epipolarLines;
-    hconcat(color1,color2,epipolarLines);
-    imshow("Epipolarlines",epipolarLines);
-    imwrite("Epipolarlines.jpg",epipolarLines);
-    waitKey(0);
+    // Mat dispVec(disp.size(), CV_32FC3);
+    // for (int y = 0; y < disp.rows; y++) {
+    //     for (int x = 0; x < disp.cols; x++) {
+    //         float dx = disp_x.at<float>(y, x);
+    //         float dy = disp_y.at<float>(y, x);
+    //         float mag = sqrt(dx*dx + dy*dy);
+    //         float angle = atan2(dy, dx);
+    //         if (mag > 0) {
+    //             angle = (angle + CV_PI) / (2*CV_PI);
+    //             mag = std::min(mag / 32.0f, 1.0f);
+    //             dispVec.at<Vec3f>(y, x) = Vec3f(angle, mag, mag);
+    //         } 
+    //         else {
+    //             dispVec.at<Vec3f>(y, x) = Vec3f(0, 0, 0);
+    //         }
+    //     }
+    // }
 
-
-    // Mat h1, h2;
-    // stereoRectifyUncalibrated(inlierxl,inlierxr,svdF,imgL.size(),h1,h2);
-    // Mat imgRectl, imgRectr,rectImgs;
-    // warpPerspective(imgL, imgRectl, h1, imgL.size());
-    // warpPerspective(imgR, imgRectr, h2, imgR.size());
-
-    // hconcat(imgRectl,imgRectr,rectImgs);
-    // imshow("rectalL",rectImgs);
-    // cv::imwrite("Rectified Images SVD.jpg",rectImgs);
-    // waitKey(0);
+    // Display the horizontal and vertical disparity maps separately or combine them to visualize the disparity vectors using color.
+    cv::imshow("Horizontal Disparity", hor_disp);
+    cv::imshow("Vertical Disparity", vert_disp);
+    // imwrite("Horizontal_Disparity.png",disp_x);
+    // imwrite("Vertical_Disparity.png",disp_y);
+    imshow("Disparity Vector Map", dispVec);
+    cv::waitKey(0);
 }
