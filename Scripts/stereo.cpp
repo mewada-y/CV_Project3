@@ -571,7 +571,9 @@ void imageMosaicing::findEpipolarlines(vector<Point2f> inlierxl,vector<Point2f> 
     for (int i = 0; i < lines2->rows ; i++){
         for (int j = 0; j < lines2->cols; j++){
             Scalar color = Scalar(rng.uniform(0,255), rng.uniform(0, 255), rng.uniform(0, 255));
-            line(color2,Point(0,-(lines2->at<Vec3f>(i,j))[2]/ lines2->at<Vec3f>(i,j)[1]),Point(imgRectL.cols,-(lines2->at<Vec3f>(i,j)[2] + lines2->at<Vec3f>(i,j)[0] * imgRectL.cols)/ lines2->at<Vec3f>(i,j)[1]),color);
+            line(color2,
+                Point(0,-(lines2->at<Vec3f>(i,j))[2]/ lines2->at<Vec3f>(i,j)[1]),
+                Point(imgRectL.cols,-(lines2->at<Vec3f>(i,j)[2] + lines2->at<Vec3f>(i,j)[0] * imgRectL.cols)/ lines2->at<Vec3f>(i,j)[1]),color);
         }
     }
     Mat epipolarLines;
@@ -650,91 +652,58 @@ int main(){
     Mat epi1,epi2;
     p3.findEpipolarlines(inlierxl,inlierxr,F,imgR,imgL,&epi1,&epi2);
     
-   Ptr<StereoSGBM> stereo = StereoSGBM::create(0, 16, 3);
-
+    Ptr<StereoSGBM> stereo = StereoSGBM::create(0, 64, 20);
+    // stereo->setMode(StereoSGBM::MODE_SGBM_3WAY);
     // Compute disparity map
     Mat disp; Mat dispor;
     cv::Mat disp_x, disp_y; // horizontal and vertical disparity maps
     stereo->compute(imgRectL, imgRectR, disp);
-    cv::Sobel(disp, disp_x, CV_32F, 1, 0);
-    cv::Sobel(disp, disp_y, CV_32F, 0, 1);
+    imshow("Disparity Vector Map", disp);
+    normalize(disp, disp, 0, 255, NORM_MINMAX, CV_8U);
+    imshow("Disparity", disp);
 
-    // Scale the disparity maps to the desired range
-    double min_disp, max_disp;
-    cv::minMaxLoc(disp, &min_disp, &max_disp);
-    disp_x = 255 * (disp_x - min_disp) / (max_disp - min_disp);
-    disp_y = 255 * (disp_y - min_disp) / (max_disp - min_disp);
-
-    // Convert the disparity maps to 8-bit unsigned integers
-    disp_x.convertTo(disp_x, CV_8U);
-    disp_y.convertTo(disp_y, CV_8U);
-
-    Mat vert_disp(disp.size(), CV_32F);
-    Mat hor_disp(disp.size(), CV_32F);
-    Mat disp_vec(disp.size(), CV_32F);
-    for (int i =0;i<disp.rows;i++){
-        for (int j =0;j<disp.cols;j++){
-            Vec3f epiline = epi1.at<Vec3f>(i,j);
-            if ((abs(epi1.at<Vec3f>(i,j)[1])) > (abs(epi1.at<Vec3f>(i,j)[0]))){
-                hor_disp.at<uchar>(i,j) = 0.0;
-                vert_disp.at<uchar>(i,j) = disp.at<uchar>(i,j)/(abs(epiline[1]));
-                cout << "vertical" << endl;
-            }
-            else{
-                vert_disp.at<uchar>(i,j) = 0.0;
-                hor_disp.at<uchar>(i,j) = disp.at<uchar>(i,j)/(abs(epiline[0]));
-            }
+    Mat vertDisp = Mat::zeros(disp.size(), CV_32FC1);
+    for (int y = 1; y < disp.rows; y++)
+    {
+        for (int x = 0; x < disp.cols; x++)
+        {
+            float dispDiff = disp.at<short>(y, x) - disp.at<short>(y-1, x);
+            vertDisp.at<float>(y, x) = dispDiff;
         }
     }
-    Mat dispVec(disp.size(), CV_32FC3);
 
-    for (int i = 0; i < disp.rows; i++) {
-    for (int j = 0; j < disp.cols; j++) {
-        Point2f pt(j, i);
-        Mat pt1 = (Mat_<double>(3,1) << pt.x, pt.y, 1);
-        Mat pt2 = F * pt1;
-        float x = pt2.at<double>(0,0);
-        float y = pt2.at<double>(1,0);
-        float z = pt2.at<double>(2,0);
-        float disp_val = disp.at<uchar>(i, j);
-        if (z != 0.0) {
-            float vert_disp_val = disp_val * y / z;
-            float hor_disp_val = disp_val * x / z;
-            vert_disp.at<uchar>(i, j) = vert_disp_val;
-            hor_disp.at<uchar>(i, j) = hor_disp_val;
-            float hue = atan2(y, x) * 180 / CV_PI / 2 + 0.5;
-            float saturation = sqrt(x * x + y * y) / z * 255;
-            Vec3b color(saturation, saturation, saturation);
-            color.val[0] = hue;
-            disp_vec.at<Vec3b>(i, j) = color;
+    // Output the vertical disparity as an image
+    normalize(vertDisp, vertDisp, 0, 255, NORM_MINMAX, CV_8UC1);
+    imwrite("vertical_disparity.png", vertDisp);
+    waitKey(0);
+
+    Mat dispVec = Mat::zeros(disp.size(), CV_32FC3);
+    for (int y = 0; y < disp.rows; y++) {
+        for (int x = 0; x < disp.cols; x++) {
+        float dx = disp.at<float>(y, x);
+        float dy = vertDisp.at<float>(y, x);
+        float mag = sqrt(dx*dx + dy*dy);
+        float angle = atan2(dy, dx);
+        if (angle<0) angle += CV_PI;
+        angle *= 180 / CV_PI;
+        mag = std::min(mag, 32.0f);
+        mag /= 32.0f;
+        dispVec.at<Vec2f>(y, x) = Vec2f(angle, mag,mag);
         }
     }
-}
-    // cvtColor(disp, disp_vec, COLOR_GRAY2BGR);
+    imshow("Disparity vector", dispVec);
+    normalize(dispVec, dispVec, 0, 255, NORM_MINMAX, CV_8U);
+    imwrite("Disparity_vector.png",dispVec);
+    waitKey(0);
+    // cv::waitKey(0);
 
-    // Mat dispVec(disp.size(), CV_32FC3);
-    // for (int y = 0; y < disp.rows; y++) {
-    //     for (int x = 0; x < disp.cols; x++) {
-    //         float dx = disp_x.at<float>(y, x);
-    //         float dy = disp_y.at<float>(y, x);
-    //         float mag = sqrt(dx*dx + dy*dy);
-    //         float angle = atan2(dy, dx);
-    //         if (mag > 0) {
-    //             angle = (angle + CV_PI) / (2*CV_PI);
-    //             mag = std::min(mag / 32.0f, 1.0f);
-    //             dispVec.at<Vec3f>(y, x) = Vec3f(angle, mag, mag);
-    //         } 
-    //         else {
-    //             dispVec.at<Vec3f>(y, x) = Vec3f(0, 0, 0);
-    //         }
-    //     }
-    // }
-
-    // Display the horizontal and vertical disparity maps separately or combine them to visualize the disparity vectors using color.
-    cv::imshow("Horizontal Disparity", hor_disp);
-    cv::imshow("Vertical Disparity", vert_disp);
-    // imwrite("Horizontal_Disparity.png",disp_x);
-    // imwrite("Vertical_Disparity.png",disp_y);
-    imshow("Disparity Vector Map", dispVec);
-    cv::waitKey(0);
+    // Ptr<StereoSGBM> stereo1 = StereoSGBM::create(0, 60, 20);
+    // stereo1->setMode(StereoSGBM::MODE_SGBM);
+    // // Compute disparity map
+    // Mat disp1; 
+    // stereo1->compute(imgRectL, imgRectR, disp1);
+    // imshow("Disparity Vector Map", disp1);
+    // normalize(disp1, disp1, 0, 255, NORM_MINMAX, CV_8U);
+    // imshow("Disparity1", disp1);
+    // cv::waitKey(0);
 }
